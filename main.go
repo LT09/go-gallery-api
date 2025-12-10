@@ -3,6 +3,7 @@ package main // บอก Go ว่านี่คือโปรแกรมห
 import (
 	"encoding/json" // ใช้แปลง struct → JSON
 	"net/http"      // ใช้สร้าง web server และ API
+	"strconv"       // ใช้แปลง string → int
 )
 
 // =========================
@@ -67,8 +68,39 @@ func galleryHandler(w http.ResponseWriter, r *http.Request) {
 	// ✅ บอก client ว่าจะส่ง JSON กลับไป
 	w.Header().Set("Content-Type", "application/json")
 
-	// ✅ แปลง struct → JSON และส่งกลับไปทันที
+	// ✅ ดึงค่า id จาก query string เช่น ?id=2
+	idStr := r.URL.Query().Get("id")
+
+	// ✅ ถ้าไม่มี id → ส่งข้อมูลทั้งหมด
+	if idStr == "" {
+		// ✅ แปลง struct → JSON และส่งกลับไปทันที
 	json.NewEncoder(w).Encode(galleries)
+		return
+	}
+
+	// ✅ แปลง id จาก string → int
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Invalid ID",
+		})
+		return
+	}
+
+	// ✅ วน loop หา gallery ที่ id ตรงกัน
+	for _, g := range galleries {
+		if g.ID == id {
+			json.NewEncoder(w).Encode(g)
+			return
+		}
+	}
+
+	// ✅ ถ้า loop ครบแล้วไม่เจอ
+	w.WriteHeader(http.StatusNotFound)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Gallery not found",
+	})
 }
 
 
