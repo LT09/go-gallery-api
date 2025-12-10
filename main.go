@@ -1,30 +1,27 @@
-package main // บอก Go ว่านี่คือโปรแกรมหลักที่รันได้จริง
+package main
 
 import (
-	"encoding/json" // ใช้แปลง struct → JSON
-	"net/http"      // ใช้สร้าง web server และ API
-	"strconv"       // ใช้แปลง string → int
+	"encoding/json" // แปลง struct ↔ JSON
+	"net/http"      // สร้าง API / Server
+	"strconv"       // แปลง string ↔ int
+	"strings"       // จัดการ string (เช่น split path)
 )
 
 // =========================
 // 🟢 1. โครงสร้างข้อมูล (Model)
 // =========================
 
-// Gallery คือโครงสร้างข้อมูลของรูป 1 ชิ้น
-// เทียบได้กับ interface หรือ type ใน TypeScript
 type Gallery struct {
-	ID     int    `json:"id"`     // id ของรูป
-	Name   string `json:"name"`   // ชื่อรูป
-	Image  string `json:"image"`  // path ของไฟล์รูป
-	Detail string `json:"detail"` // รายละเอียด
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Image  string `json:"image"`
+	Detail string `json:"detail"`
 }
 
-
 // =========================
-// 🟢 2. Mock Database (จำลองฐานข้อมูล)
+// 🟢 2. Mock Database
 // =========================
 
-// galleries คือข้อมูลจำลองที่ใช้แทนฐานข้อมูลจริง
 var galleries = []Gallery{
 	{
 		ID:     1,
@@ -46,39 +43,98 @@ var galleries = []Gallery{
 	},
 }
 
-
 // =========================
-// 🟢 3. API Handler (Controller)
+// 🟢 3. CORS Middleware
 // =========================
 
-// galleryHandler จะทำงานเมื่อมีคนเรียก /api/gallery
-func galleryHandler(w http.ResponseWriter, r *http.Request) {
-
-	// ✅ CORS: อนุญาตให้ทุกเว็บเรียก API นี้ได้ (ใช้ตอนพัฒนา)
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+func enableCORS(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*") // อนุญาตทุกเว็บเรียก
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
 
-	// ✅ ถ้าเป็น preflight (OPTIONS) ให้จบทันที
+// =========================
+// 🟢 4. GET ทั้งหมด + POST เพิ่มข้อมูล
+// =========================
+
+func galleriesHandler(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+
+	// ✅ ถ้า Browser ส่ง OPTIONS มาก่อน (preflight)
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	// ✅ บอก client ว่าจะส่ง JSON กลับไป
 	w.Header().Set("Content-Type", "application/json")
 
-	// ✅ ดึงค่า id จาก query string เช่น ?id=2
-	idStr := r.URL.Query().Get("id")
-
-	// ✅ ถ้าไม่มี id → ส่งข้อมูลทั้งหมด
-	if idStr == "" {
-		// ✅ แปลง struct → JSON และส่งกลับไปทันที
-	json.NewEncoder(w).Encode(galleries)
+	// ✅ GET → ดึงข้อมูลทั้งหมด
+	if r.Method == "GET" {
+		json.NewEncoder(w).Encode(galleries)
 		return
 	}
 
-	// ✅ แปลง id จาก string → int
+	// ✅ POST → เพิ่มข้อมูลใหม่
+	if r.Method == "POST" {
+		var newGallery Gallery
+
+		// แปลง JSON จาก body → struct
+		err := json.NewDecoder(r.Body).Decode(&newGallery)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"message": "Invalid JSON",
+			})
+			return
+		}
+
+		// ✅ สร้าง ID ใหม่อัตโนมัติ
+		newGallery.ID = len(galleries) + 1
+
+		// ✅ เพิ่มเข้า mock database
+		galleries = append(galleries, newGallery)
+
+		// ✅ ส่ง response กลับไป
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Gallery added successfully",
+			"data":    newGallery,
+		})
+		return
+	}
+
+	// ✅ ถ้าไม่ใช่ GET / POST
+	w.WriteHeader(http.StatusMethodNotAllowed)
+}
+
+// =========================
+// 🟢 5. GET ตาม ID
+// =========================
+
+func galleryByIDHandler(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// ✅ ดึง id จาก URL เช่น /api/gallery/2
+	path := strings.TrimPrefix(r.URL.Path, "/api/gallery/")
+	idStr := path
+
+	// ✅ ถ้าไม่มี id → error
+	if idStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "ID is required",
+		})
+		return
+	}
+
+	// ✅ แปลง string → int
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -88,44 +144,39 @@ func galleryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ วน loop หา gallery ที่ id ตรงกัน
-	for _, g := range galleries {
-		if g.ID == id {
-			json.NewEncoder(w).Encode(g)
+	// ✅ วนหา gallery ตาม id
+	for _, item := range galleries {
+		if item.ID == id {
+			json.NewEncoder(w).Encode(item)
 			return
 		}
 	}
 
-	// ✅ ถ้า loop ครบแล้วไม่เจอ
+	// ✅ ถ้าไม่เจอ id
 	w.WriteHeader(http.StatusNotFound)
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Gallery not found",
 	})
 }
 
-
 // =========================
-// 🟢 4. main() จุดเริ่มต้นโปรแกรม
+// 🟢 6. main
 // =========================
 
 func main() {
 
-	// ✅ ให้ Go Server เสิร์ฟไฟล์ทุกไฟล์ในโฟลเดอร์ images
-	// ถ้า browser เรียก /images/xxx.jpg → ไปอ่านไฟล์จากโฟลเดอร์ images
-	http.Handle(
-		"/images/",
-		http.StripPrefix(
-			"/images/",
+	// ✅ เสิร์ฟไฟล์รูปจากโฟลเดอร์ images
+	http.Handle("/images/",
+		http.StripPrefix("/images/",
 			http.FileServer(http.Dir("images")),
 		),
 	)
 
-	// ✅ ผูก API /api/gallery กับฟังก์ชัน galleryHandler
-	http.HandleFunc("/api/gallery", galleryHandler)
+	// ✅ GET ทั้งหมด + POST เพิ่ม
+	http.HandleFunc("/api/gallery", galleriesHandler)
 
-	// ✅ แสดงข้อความใน terminal
+	// ✅ GET ตาม id
+	http.HandleFunc("/api/gallery/", galleryByIDHandler)
 	println("✅ Server running at http://localhost:8080")
-
-	// ✅ เปิด server ที่ port 8080 และรอ request ไปเรื่อยๆ
 	http.ListenAndServe(":8080", nil)
 }
