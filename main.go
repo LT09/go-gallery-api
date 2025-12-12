@@ -2,14 +2,16 @@ package main
 
 import (
 	"encoding/json" // แปลง struct ↔ JSON
-	"net/http"      // สร้าง API / Server
+	"net/http"      // ใช้ทำ API / Server
 	"strconv"       // แปลง string ↔ int
-	"strings"       // จัดการ string (เช่น split path)
+	"strings"       // ตัด/จัดการ string
 )
 
+//
 // =========================
 // 🟢 1. โครงสร้างข้อมูล (Model)
 // =========================
+//
 
 type Gallery struct {
 	ID     int    `json:"id"`
@@ -18,15 +20,17 @@ type Gallery struct {
 	Detail string `json:"detail"`
 }
 
+//
 // =========================
-// 🟢 2. Mock Database
+// 🟢 2. Mock Database (ข้อมูลชั่วคราวใน slice)
 // =========================
+//
 
 var galleries = []Gallery{
 	{
 		ID:     1,
 		Name:   "Mochizuki Honami",
-		Image:  "/images/Honami_wedding.png", // path ไปยังไฟล์รูปจริง
+		Image:  "/images/Honami_wedding.png",
 		Detail: "Mochizuki Honami Wedding Dress Ver.",
 	},
 	{
@@ -43,46 +47,55 @@ var galleries = []Gallery{
 	},
 }
 
+//
 // =========================
-// 🟢 3. CORS Middleware
+// 🟢 3. ฟังก์ชันเปิด CORS (ใช้ทุก API)
 // =========================
+//
 
 func enableCORS(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*") // อนุญาตทุกเว็บเรียก
+	w.Header().Set("Access-Control-Allow-Origin", "*") // ทุกเว็บเรียก API ได้
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
+//
 // =========================
-// 🟢 4. GET ทั้งหมด + POST เพิ่มข้อมูล
+// 🟢 4. Handler หลัก: GET / POST / PUT / DELETE
 // =========================
+//
 
 func galleryHandler(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 
-	// Preflight → OPTIONS
+	// Preflight → OPTIONS (Browser จะยิงมาก่อน POST/PUT/DELETE)
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
+	// ทุก response เป็น JSON
 	w.Header().Set("Content-Type", "application/json")
 
-	// ดึง path หลัง /api/gallery/
-	path := strings.TrimPrefix(r.URL.Path, "/api/gallery/")
-	idStr := path // ถ้าว่าง = ไม่มี ID
+	//
+	// 🟡 ดึง ID จาก URL
+	// เช่น /api/gallery/5 → "5"
+	//
+	path := strings.TrimPrefix(r.URL.Path, "/api/gallery") // แก้จุด error หลัก
+	path = strings.TrimPrefix(path, "/")                    // ตัด "/" หน้าออก ถ้ามี
+	idStr := path                                           // ถ้าว่าง = ไม่มี ID
 
-	// -------------------------
-	// GET ทั้งหมด
-	// -------------------------
+	//
+	// 🟢 GET ทั้งหมด (ไม่มี ID)
+	//
 	if r.Method == "GET" && idStr == "" {
 		json.NewEncoder(w).Encode(galleries)
 		return
 	}
 
-	// -------------------------
-	// มี ID → ต้องแปลงเป็น int
-	// -------------------------
+	//
+	// 🟡 มี ID → แปลงเป็น int
+	//
 	var id int
 	var err error
 	if idStr != "" {
@@ -93,9 +106,9 @@ func galleryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// -------------------------
-	// GET by ID
-	// -------------------------
+	//
+	// 🟢 GET by ID
+	//
 	if r.Method == "GET" {
 		for _, g := range galleries {
 			if g.ID == id {
@@ -103,25 +116,28 @@ func galleryHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+
 		http.Error(w, "Gallery not found", http.StatusNotFound)
 		return
 	}
 
-	// -------------------------
-	// POST - เพิ่มข้อมูลใหม่
-	// -------------------------
+	//
+	// 🟢 POST → เพิ่มข้อมูลใหม่
+	//
 	if r.Method == "POST" {
+
 		var newItem Gallery
 
-		// decode JSON body → struct
+		// อ่าน JSON body → struct
 		err := json.NewDecoder(r.Body).Decode(&newItem)
 		if err != nil {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
 
-		// Auto ID
+		// Auto ID (ง่ายๆ)
 		newItem.ID = len(galleries) + 1
+
 		galleries = append(galleries, newItem)
 
 		w.WriteHeader(http.StatusCreated)
@@ -129,9 +145,9 @@ func galleryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// -------------------------
-	// PUT - แก้ไขข้อมูลตาม ID
-	// -------------------------
+	//
+	// 🟢 PUT แก้ไขข้อมูลตาม ID
+	//
 	if r.Method == "PUT" {
 		var updateItem Gallery
 
@@ -144,7 +160,7 @@ func galleryHandler(w http.ResponseWriter, r *http.Request) {
 		for i, g := range galleries {
 			if g.ID == id {
 
-				// อัปเดตข้อมูลใหม่
+				// อัปเดตข้อมูล
 				galleries[i].Name = updateItem.Name
 				galleries[i].Image = updateItem.Image
 				galleries[i].Detail = updateItem.Detail
@@ -158,10 +174,11 @@ func galleryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// -------------------------
-	// DELETE - ลบข้อมูลตาม ID
-	// -------------------------
+	//
+	// 🟢 DELETE - ลบข้อมูลตาม ID
+	//
 	if r.Method == "DELETE" {
+
 		for i, g := range galleries {
 			if g.ID == id {
 
@@ -178,25 +195,33 @@ func galleryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Method ไม่รองรับ
+	//
+	// ❌ Method ที่ไม่รองรับ
+	//
 	http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 }
 
+//
 // =========================
-// 🟢 6. main
+// 🟢 5. main function
 // =========================
+//
 
 func main() {
 
-	// ✅ เสิร์ฟไฟล์รูปจากโฟลเดอร์ images
+	// เสิร์ฟไฟล์รูปจริง
+	// /images/... → ไปหยิบจากโฟลเดอร์ images
 	http.Handle("/images/",
 		http.StripPrefix("/images/",
 			http.FileServer(http.Dir("images")),
 		),
 	)
 
-	// ✅ GET POST PUT DELETE /api/gallery/
-	http.HandleFunc("/api/gallery/", galleryHandler)
-	println("✅ Server running at http://localhost:8080")
+	// ❗️❗️ สำคัญมาก: ต้องให้รองรับทั้ง /api/gallery และ /api/gallery/
+	// ไม่งั้น POST /api/gallery จะไม่เข้า handler
+	http.HandleFunc("/api/gallery", galleryHandler)  // แบบไม่มี slash ท้าย
+	http.HandleFunc("/api/gallery/", galleryHandler) // แบบมี slash ท้าย
+
+	println("🚀 Server running at http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
 }
