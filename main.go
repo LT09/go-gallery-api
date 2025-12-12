@@ -49,7 +49,7 @@ var galleries = []Gallery{
 
 func enableCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*") // อนุญาตทุกเว็บเรียก
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
@@ -57,10 +57,10 @@ func enableCORS(w http.ResponseWriter) {
 // 🟢 4. GET ทั้งหมด + POST เพิ่มข้อมูล
 // =========================
 
-func galleriesHandler(w http.ResponseWriter, r *http.Request) {
+func galleryHandler(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 
-	// ✅ ถ้า Browser ส่ง OPTIONS มาก่อน (preflight)
+	// Preflight → OPTIONS
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -68,95 +68,118 @@ func galleriesHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// ✅ GET → ดึงข้อมูลทั้งหมด
-	if r.Method == "GET" {
+	// ดึง path หลัง /api/gallery/
+	path := strings.TrimPrefix(r.URL.Path, "/api/gallery/")
+	idStr := path // ถ้าว่าง = ไม่มี ID
+
+	// -------------------------
+	// GET ทั้งหมด
+	// -------------------------
+	if r.Method == "GET" && idStr == "" {
 		json.NewEncoder(w).Encode(galleries)
 		return
 	}
 
-	// ✅ POST → เพิ่มข้อมูลใหม่
-	if r.Method == "POST" {
-		var newGallery Gallery
-
-		// แปลง JSON จาก body → struct
-		err := json.NewDecoder(r.Body).Decode(&newGallery)
+	// -------------------------
+	// มี ID → ต้องแปลงเป็น int
+	// -------------------------
+	var id int
+	var err error
+	if idStr != "" {
+		id, err = strconv.Atoi(idStr)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{
-				"message": "Invalid JSON",
-			})
+			http.Error(w, "Invalid ID", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// -------------------------
+	// GET by ID
+	// -------------------------
+	if r.Method == "GET" {
+		for _, g := range galleries {
+			if g.ID == id {
+				json.NewEncoder(w).Encode(g)
+				return
+			}
+		}
+		http.Error(w, "Gallery not found", http.StatusNotFound)
+		return
+	}
+
+	// -------------------------
+	// POST - เพิ่มข้อมูลใหม่
+	// -------------------------
+	if r.Method == "POST" {
+		var newItem Gallery
+
+		// decode JSON body → struct
+		err := json.NewDecoder(r.Body).Decode(&newItem)
+		if err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
 
-		// ✅ สร้าง ID ใหม่อัตโนมัติ
-		newGallery.ID = len(galleries) + 1
+		// Auto ID
+		newItem.ID = len(galleries) + 1
+		galleries = append(galleries, newItem)
 
-		// ✅ เพิ่มเข้า mock database
-		galleries = append(galleries, newGallery)
-
-		// ✅ ส่ง response กลับไป
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"message": "Gallery added successfully",
-			"data":    newGallery,
-		})
+		json.NewEncoder(w).Encode(newItem)
 		return
 	}
 
-	// ✅ ถ้าไม่ใช่ GET / POST
-	w.WriteHeader(http.StatusMethodNotAllowed)
-}
+	// -------------------------
+	// PUT - แก้ไขข้อมูลตาม ID
+	// -------------------------
+	if r.Method == "PUT" {
+		var updateItem Gallery
 
-// =========================
-// 🟢 5. GET ตาม ID
-// =========================
-
-func galleryByIDHandler(w http.ResponseWriter, r *http.Request) {
-	enableCORS(w)
-
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-
-	// ✅ ดึง id จาก URL เช่น /api/gallery/2
-	path := strings.TrimPrefix(r.URL.Path, "/api/gallery/")
-	idStr := path
-
-	// ✅ ถ้าไม่มี id → error
-	if idStr == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"message": "ID is required",
-		})
-		return
-	}
-
-	// ✅ แปลง string → int
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"message": "Invalid ID",
-		})
-		return
-	}
-
-	// ✅ วนหา gallery ตาม id
-	for _, item := range galleries {
-		if item.ID == id {
-			json.NewEncoder(w).Encode(item)
+		err := json.NewDecoder(r.Body).Decode(&updateItem)
+		if err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
+
+		for i, g := range galleries {
+			if g.ID == id {
+
+				// อัปเดตข้อมูลใหม่
+				galleries[i].Name = updateItem.Name
+				galleries[i].Image = updateItem.Image
+				galleries[i].Detail = updateItem.Detail
+
+				json.NewEncoder(w).Encode(galleries[i])
+				return
+			}
+		}
+
+		http.Error(w, "Gallery not found", http.StatusNotFound)
+		return
 	}
 
-	// ✅ ถ้าไม่เจอ id
-	w.WriteHeader(http.StatusNotFound)
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Gallery not found",
-	})
+	// -------------------------
+	// DELETE - ลบข้อมูลตาม ID
+	// -------------------------
+	if r.Method == "DELETE" {
+		for i, g := range galleries {
+			if g.ID == id {
+
+				// ลบ index i ออกจาก slice
+				galleries = append(galleries[:i], galleries[i+1:]...)
+
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("Deleted successfully"))
+				return
+			}
+		}
+
+		http.Error(w, "Gallery not found", http.StatusNotFound)
+		return
+	}
+
+	// Method ไม่รองรับ
+	http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 }
 
 // =========================
@@ -172,11 +195,8 @@ func main() {
 		),
 	)
 
-	// ✅ GET ทั้งหมด + POST เพิ่ม
-	http.HandleFunc("/api/gallery", galleriesHandler)
-
-	// ✅ GET ตาม id
-	http.HandleFunc("/api/gallery/", galleryByIDHandler)
+	// ✅ GET POST PUT DELETE /api/gallery/
+	http.HandleFunc("/api/gallery/", galleryHandler)
 	println("✅ Server running at http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
 }
